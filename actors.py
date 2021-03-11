@@ -2,6 +2,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributions.categorical import Categorical
+from tools import onehot
 
 class RandomActor():
     """Random actor""" 
@@ -10,6 +12,7 @@ class RandomActor():
         return np.random.choice(actions)
 
 class ManualActor():
+    """Manual Actor, leave render off in workflow"""
     def __init__(self, env):
         self.env = env
 
@@ -28,15 +31,25 @@ class FCPolicy(nn.Module):
     def __init__(self):
         super(FCPolicy, self).__init__()
         self.layer1 = nn.Linear(6*7*3, 128)
-        self.layer2 = nn.Linear(128, 8)
+        self.layer2 = nn.Linear(128, 7)
+        self.flatten = nn.Flatten()
     
     def forward(self, x):
-        x = x.view(-1)
+        x = self.flatten(x)
         x = self.layer1(x)
         x = F.relu(x)
         x = self.layer2(x)
         x = F.softmax(x, dim=-1)
         return x
+    
+    def get_policy(self, obs):
+        probs = self.forward(obs)
+        return Categorical(probs)
+
+    def act(self, obs):
+        obs = np.expand_dims(onehot(obs['board']), axis=0)
+        obs = torch.as_tensor(obs, dtype=torch.float32)
+        return self.get_policy(obs).sample().item()
 
 
 if __name__ == "__main__":
