@@ -9,13 +9,15 @@ from tools import onehot
 import actors
 
 def compute_loss(actor, obs, act, weights):
+    """ Policy Gradient Loss """
     logp = actor.get_policy(obs).log_prob(act)
     return -(logp * weights).mean()
 
-def train_step(env, actors, optimizer):
-    batch_obs = []
-    batch_acts = []
-    batch_weights = []
+def train_step(env, actors, optimizer, player=0):
+    """ Training after playing 1 game """
+    game_obs = []
+    game_acts = []
+    game_weights = []
 
     game_length = 0
     reward = None
@@ -23,7 +25,11 @@ def train_step(env, actors, optimizer):
     obses = env.reset()
     game_over = False
 
-    training_player_turn = True
+    if player == 0:
+        training_player_turn = True
+    else:
+        training_player_turn = False
+
     turns = 0
     while True:
         action_dict = {}
@@ -32,9 +38,9 @@ def train_step(env, actors, optimizer):
             action = actor.act(obs)
 
             if training_player_turn and actor_id == 0:
-                while True:
-                    batch_acts.append(np.expand_dims(action, axis=0))
-                    batch_obs.append(onehot(obs['board']))
+                while True: # Keep sampling actions until it is valid
+                    game_acts.append(np.expand_dims(action, axis=0))
+                    game_obs.append(onehot(obs['board']))
                     game_length += 1
                     
                     if env.game.is_valid_move(action):
@@ -47,7 +53,7 @@ def train_step(env, actors, optimizer):
 
         if game_over:
             reward = rewards[0]
-            batch_weights = [reward] * game_length
+            game_weights = [reward] * game_length
             break
 
         training_player_turn = not training_player_turn
@@ -55,9 +61,9 @@ def train_step(env, actors, optimizer):
     
     optimizer.zero_grad()
     game_loss = compute_loss(actor=actors[0],
-                             obs=torch.as_tensor(batch_obs, dtype=torch.float32),
-                             act=torch.as_tensor(batch_acts, dtype=torch.int32),
-                             weights=torch.as_tensor(batch_weights, dtype=torch.float32)
+                             obs=torch.as_tensor(game_obs, dtype=torch.float32),
+                             act=torch.as_tensor(game_acts, dtype=torch.int32),
+                             weights=torch.as_tensor(game_weights, dtype=torch.float32)
                             )
 
     game_loss.backward()
