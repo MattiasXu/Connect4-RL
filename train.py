@@ -7,20 +7,23 @@ from torch.distributions.categorical import Categorical
 import sys
 from tools import onehot
 import actors
+import signal
 
-def compute_loss(actor, obs, act, weights):
+
+def compute_loss(actor, obs, act, weights, mask):
     """ Policy Gradient Loss """
-    logp = actor.get_policy(obs).log_prob(act)
+    logp = actor.get_policy(obs, mask).log_prob(act)
     return -(logp * weights).mean()
 
 def train_step(env, actors, optimizer, player=0):
     """ Training after playing 1 game """
     game_obs = []
     game_acts = []
+    game_mask = []
     game_weights = []
 
     game_length = 0
-    reward = None
+    reward = 0
 
     obses = env.reset()
     game_over = False
@@ -29,66 +32,106 @@ def train_step(env, actors, optimizer, player=0):
         training_player_turn = True
     else:
         training_player_turn = False
-
+    repeat = 0
     turns = 0
-    while True:
+    while not game_over:
         action_dict = {}
         for actor_id, actor in enumerate(actors):
             obs = obses[actor_id]
-            action = actor.act(obs)
 
-            if training_player_turn and actor_id == 0:
-                while True: # Keep sampling actions until it is valid
-                    game_acts.append(np.expand_dims(action, axis=0))
-                    game_obs.append(onehot(obs['board']))
-                    game_length += 1
-                    
-                    if env.game.is_valid_move(action):
-                        break
-                    action = actor.act(obs)
-            
+            action = actor.act(obs)
+            if training_player_turn and actor_id == player:
+                game_acts.append(action)
+                game_obs.append(onehot(obs['board']))
+                game_mask.append(obs['action_mask'])
+                game_length += 1
+            elif True:
+                action = actor.act(obs)
+
             action_dict[actor_id] = action
 
         obses, rewards, game_over, info = env.step(action_dict)
 
         if game_over:
-            reward = rewards[0]
+            result = rewards[player]
+            reward += rewards[player]
             game_weights = [reward] * game_length
-            break
 
         training_player_turn = not training_player_turn
         turns += 1
     
     optimizer.zero_grad()
-    game_loss = compute_loss(actor=actors[0],
+    game_loss = compute_loss(actor=actors[player],
                              obs=torch.as_tensor(game_obs, dtype=torch.float32),
                              act=torch.as_tensor(game_acts, dtype=torch.int32),
-                             weights=torch.as_tensor(game_weights, dtype=torch.float32)
+                             weights=torch.as_tensor(game_weights, dtype=torch.float32),
+                             mask=torch.as_tensor(game_mask, dtype=torch.int32).detach(),
                             )
 
     game_loss.backward()
     optimizer.step()
-    return reward
+    return result, game_length
 
 
 def train():
+    def save_model(sig, frame):
+        print("Saving model...")
+        torch.save(actor_train.state_dict(), "./saved_models/FCPolicyInterrupt.pt")
+        sys.exit(0)
+    
     env = gym.make('Connect4Env-v0')
+    lr = 0.00001
+    games = 1000000
+    load = True
+    save = True
 
-    lr = 0.001
-    games = 100000
+    if save:
+        signal.signal(signal.SIGINT, save_model) 
 
-    actor1 = actors.FCPolicy()
-    actor2 = actors.RandomActor()
-    actor_list = [actor1, actor2]
+    actor_train = actors.FCPolicy()
+    actor_opponent = actors.FCPolicy()
+    actor_opponent.load_state_dict(torch.load("./saved_models/FCPolicyInterrupt.pt"))
+    actor_opponent.eval()
 
-    optimizer = torch.optim.Adam(actor1.parameters(), lr=lr)
+    train_idx = 0
+    actor_list = [actor_train, actor_opponent]
 
-    reward = 0
+    if load:
+        actor_train.load_state_dict(torch.load("./saved_models/FCPolicyInterrupt.pt"))
+    optimizer = torch.optim.Adam(actor_train.parameters(), lr=lr)
+
+    wins = 0
+    draws = 0
+    losses = 0
+    game_lengths = 0
     for i in range(games):
-        reward += train_step(env, actor_list, optimizer)
+        if np.random.rand() < 0.5: # Flip starting player
+            train_idx ^= 1
+            actor_list[0], actor_list[1] = actor_list[1], actor_list[0]
+
+        result, game_length = train_step(env, actor_list, optimizer, train_idx)
+        game_lengths += game_length
+        if result == 1:
+            wins += 1
+        elif result == 0:
+            draws += 1
+        else:
+            losses += 1
         if i % 100 == 99:
-            print(f"Avg Reward after 100: {reward}")
-            reward = 0
+            print(f"Results after 100: {wins}W, {draws}D, {losses}L | Game len {game_lengths}")
+            wins = 0
+            draws = 0
+            losses = 0
+            game_lengths = 0
+        
+        if i % 3000 == 2999:
+            print("Checkpoint reached")
+            torch.save(actor_train.state_dict(), "./saved_models/checkpoint.pt")
+            actor_opponent.load_state_dict(actor_train.state_dict())
+    
+    torch.save(actor_train.state_dict(), "./saved_models/final.pt")
+
 
 if __name__ == "__main__":
     train()
+    
