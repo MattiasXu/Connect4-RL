@@ -72,7 +72,7 @@ def train_step(env, actors, optimizer, player=0):
     optimizer.step()
     return result, game_length
 
-
+# TEST
 def train():
     def save_model(sig, frame):
         print("Saving model...")
