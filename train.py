@@ -88,9 +88,7 @@ def train():
         signal.signal(signal.SIGINT, save_model) 
 
     actor_train = actors.FCPolicy()
-    actor_opponent = actors.FCPolicy()
-    actor_opponent.load_state_dict(torch.load("./saved_models/FCPolicyInterrupt.pt"))
-    actor_opponent.eval()
+    actor_opponent = actors.RandomActor()
 
     train_idx = 0
     actor_list = [actor_train, actor_opponent]
@@ -103,7 +101,16 @@ def train():
     draws = 0
     losses = 0
     game_lengths = 0
+    model_number = 0
     for i in range(games):
+        # choose opponent
+        opponent_model = np.random.randint(1 + min(model_number, 9))
+        if opponent_model == 0:
+            actor[train_idx ^ 1] = actors.RandomActor()
+        else:
+            actor[train_idx ^ 1].load_state_dict(torch.load(
+                                    f"./saved_models/model{model_number - opponent_model}"))
+
         if np.random.rand() < 0.5: # Flip starting player
             train_idx ^= 1
             actor_list[0], actor_list[1] = actor_list[1], actor_list[0]
@@ -123,9 +130,10 @@ def train():
             losses = 0
             game_lengths = 0
         
-        if i % 3000 == 2999:
+        if i % 10000 == 9999:
             print("Checkpoint reached")
-            torch.save(actor_train.state_dict(), "./saved_models/checkpoint.pt")
+            torch.save(actor_train.state_dict(), f"./saved_models/model{model_number}.pt")
+            model_number += 1
             actor_opponent.load_state_dict(actor_train.state_dict())
     
     torch.save(actor_train.state_dict(), "./saved_models/final.pt")
