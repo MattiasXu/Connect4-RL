@@ -59,7 +59,7 @@ def train_step(env, actors, optimizer, player=0):
 
         training_player_turn = not training_player_turn
         turns += 1
-    
+
     optimizer.zero_grad()
     game_loss = compute_loss(actor=actors[player],
                              obs=torch.as_tensor(game_obs, dtype=torch.float32),
@@ -77,7 +77,7 @@ def train():
         print("Saving model...")
         torch.save(actor_train.state_dict(), "./saved_models/FCPolicyInterrupt.pt")
         sys.exit(0)
-    
+
     env = gym.make('Connect4Env-v0')
     lr = 0.00001
     games = 1000000
@@ -85,7 +85,7 @@ def train():
     save = True
 
     if save:
-        signal.signal(signal.SIGINT, save_model) 
+        signal.signal(signal.SIGINT, save_model)
 
     actor_train = actors.FCPolicy()
     actor_opponent = actors.RandomActor()
@@ -106,10 +106,12 @@ def train():
         # choose opponent
         opponent_model = np.random.randint(1 + min(model_number, 9))
         if opponent_model == 0:
-            actor[train_idx ^ 1] = actors.RandomActor()
+            actor_list[train_idx ^ 1] = actors.RandomActor()
         else:
-            actor[train_idx ^ 1].load_state_dict(torch.load(
-                                    f"./saved_models/model{model_number - opponent_model}"))
+            actor_list[train_idx ^ 1] = actors.FCPolicy()
+            actor_list[train_idx ^ 1].load_state_dict(torch.load(
+                                    f"./saved_models/model{model_number - opponent_model}.pt"))
+            actor_list[train_idx ^ 1].eval()
 
         if np.random.rand() < 0.5: # Flip starting player
             train_idx ^= 1
@@ -123,22 +125,21 @@ def train():
             draws += 1
         else:
             losses += 1
-        if i % 100 == 99:
-            print(f"Results after 100: {wins}W, {draws}D, {losses}L | Game len {game_lengths}")
+        if i % 1000 == 999:
+            print(f"Results after 1000: {wins}W, {draws}D, {losses}L | Game len {game_lengths/1000}")
             wins = 0
             draws = 0
             losses = 0
             game_lengths = 0
-        
+
         if i % 10000 == 9999:
             print("Checkpoint reached")
             torch.save(actor_train.state_dict(), f"./saved_models/model{model_number}.pt")
             model_number += 1
-            actor_opponent.load_state_dict(actor_train.state_dict())
-    
+
     torch.save(actor_train.state_dict(), "./saved_models/final.pt")
 
 
 if __name__ == "__main__":
     train()
-    
+
